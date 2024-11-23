@@ -4,7 +4,7 @@ import requests
 import asyncio
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 # Настройки логирования
@@ -50,14 +50,26 @@ def load_warehouses():
 
 all_warehouses = load_warehouses()
 
-# Стартовая команда
+# Функция для отображения стартового меню с кнопкой "Меню"
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Отображает клавиатуру с кнопкой 'Меню'."""
     logger.info("Пользователь начал взаимодействие с ботом.")
-    keyboard = [
-        [InlineKeyboardButton("Настройки мониторинга", callback_data="monitoring_settings")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Добро пожаловать! Используйте кнопки ниже для работы.", reply_markup=reply_markup)
+    
+    # Reply-клавиатура с кнопкой "Меню"
+    reply_keyboard = [["Меню"]]
+    reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
+    
+    await update.message.reply_text(
+        "Добро пожаловать! Нажмите 'Меню' для настройки мониторинга.",
+        reply_markup=reply_markup
+    )
+
+# Обработчик кнопки "Меню"
+async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обрабатывает нажатие кнопки 'Меню' и вызывает настройки мониторинга."""
+    logger.info("Нажата кнопка 'Меню'.")
+    await handle_monitoring_settings(update, context)
+
 
 # Получение данных из Wildberries
 async def fetch_acceptance_coefficients():
@@ -92,7 +104,7 @@ def is_similar(warehouse_api_name, warehouse_monitor_name, threshold=0.7):
 
 
 # Настройки мониторинга
-async def monitoring_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_monitoring_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info("Пользователь открыл настройки мониторинга.")
     keyboard = [
         [InlineKeyboardButton("Выбрать диапазон дат", callback_data="set_interval")],
@@ -135,7 +147,7 @@ async def set_monitoring_interval(update: Update, context: ContextTypes.DEFAULT_
     await query.answer()
     monitoring_interval = int(query.data.split("_")[1])
     logger.info(f"Установлен диапазон мониторинга: {monitoring_interval} дней.")
-    await monitoring_settings(update, context)
+    await handle_monitoring_settings(update, context)
 
     # Функция для выбора типов приемки
 async def select_acceptance_types(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -172,17 +184,19 @@ async def finish_acceptance_types(update: Update, context: ContextTypes.DEFAULT_
     logger.info("Пользователь завершил выбор типов приемки.")
     query = update.callback_query
     await query.answer()
-    await monitoring_settings(update, context)
+    await handle_monitoring_settings(update, context)
 
 # Глобальные переменные
 warehouses = load_warehouses()  # Все склады из файла
 per_page = 5  # Количество складов на одной странице
 
 # Разделим список складов на страницы
-def paginate_warehouses(page):
+def paginate_warehouses(page: int, per_page: int = 5) -> list:
+    """Разбивает список складов на страницы."""
     start = (page - 1) * per_page
     end = start + per_page
-    return warehouses[start:end]
+    return warehouses[start:end]  # Использует исходный порядок
+
 
 
 def generate_warehouse_id(warehouse: str) -> str:
@@ -201,21 +215,12 @@ async def select_warehouses(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     # Передаем страницу в show_warehouses
     await show_warehouses(update, context, context.user_data['current_page'])
 
-async def show_warehouses(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = None):
+async def show_warehouses(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 1):
+    """Отображает список складов с навигацией."""
     logger.info(f"Отображаем страницу {page} складов.")
-    
-    if not page:
-        callback_data = update.callback_query.data
-        if callback_data.startswith("page_"):
-            page = int(callback_data.split("_")[1])
-        else:
-            page = 1
-    
-    # Paginate warehouses
     total_pages = (len(all_warehouses) + per_page - 1) // per_page
-    current_warehouses = paginate_warehouses(page)
-    
-    # Generate buttons for warehouses
+    current_warehouses = paginate_warehouses(page, per_page)
+
     keyboard = [
         [
             InlineKeyboardButton(
@@ -226,29 +231,30 @@ async def show_warehouses(update: Update, context: ContextTypes.DEFAULT_TYPE, pa
         for warehouse in current_warehouses
     ]
     
-    # Navigation buttons in one row
+    # Навигация между страницами
     navigation_buttons = []
     if page > 1:
         navigation_buttons.append(InlineKeyboardButton("<", callback_data=f"page_{page - 1}"))
     if page < total_pages:
         navigation_buttons.append(InlineKeyboardButton(">", callback_data=f"page_{page + 1}"))
-    if page > 3:
-        navigation_buttons.insert(0, InlineKeyboardButton("<<<", callback_data="page_1"))
-    if page < total_pages - 2:
-        navigation_buttons.append(InlineKeyboardButton(">>>", callback_data=f"page_{total_pages}"))
     
     if navigation_buttons:
         keyboard.append(navigation_buttons)
     
-    # Add "Finish selection" button
     keyboard.append([InlineKeyboardButton("Завершить выбор", callback_data="finish_warehouses")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.callback_query.edit_message_text(
-        f"Выберите склады (страница {page}/{total_pages}):",
-        reply_markup=reply_markup
-    )
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            text=f"Выберите склады (страница {page}/{total_pages}):",
+            reply_markup=reply_markup
+        )
+    else:
+        await update.message.reply_text(
+            text=f"Выберите склады (страница {page}/{total_pages}):",
+            reply_markup=reply_markup
+        )
+
 
 
 
@@ -305,7 +311,7 @@ async def finish_warehouses(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer()
 
     # Переход обратно к настройкам мониторинга
-    await monitoring_settings(update, context)
+    await handle_monitoring_settings(update, context)
 
 
 
@@ -325,7 +331,7 @@ async def handle_coefficient_input(update: Update, context: ContextTypes.DEFAULT
             context.user_data["awaiting_coefficient"] = False
             logger.info(f"Установлен максимальный коэффициент: {max_coefficient}.")
             await update.message.reply_text(f"Максимальный коэффициент установлен: {max_coefficient}")
-            await monitoring_settings(update, context)
+            await handle_monitoring_settings(update, context)
         except ValueError:
             await update.message.reply_text("Ошибка: введите целое число.")
 
@@ -403,60 +409,100 @@ def filter_coefficients(data, interval, max_coeff):
 
 
 
+# Модифицированный запуск мониторинга с задачей
 async def start_monitoring(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    global is_monitoring, previous_data
+    global is_monitoring, monitoring_task
     query = update.callback_query
     await query.answer()
+
+    # Проверяем, если мониторинг уже запущен
+    if is_monitoring:
+        await query.edit_message_text("Мониторинг уже запущен.")
+        return
+
     is_monitoring = True
     await query.edit_message_text("Мониторинг запущен!")
 
-    # Для ограничения логов
+    # Запускаем задачу мониторинга
+    monitoring_task = asyncio.create_task(monitoring_loop(update, context))
+
+
+# Основной цикл мониторинга
+async def monitoring_loop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    global is_monitoring, previous_data  # Указываем, что используется глобальная переменная
     log_interval = 40  # Интервал логирования
     last_log_time = datetime.now()
 
-    while is_monitoring:
-        logger.info("Запрос данных для мониторинга.")
-        coefficients = await fetch_acceptance_coefficients()
+    try:
+        while is_monitoring:  # Проверяем глобальную переменную
+            logger.info("Запрос данных для мониторинга.")
+            coefficients = await fetch_acceptance_coefficients()
 
-        if coefficients:
-            filtered = filter_coefficients(coefficients, monitoring_interval, max_coefficient)
-            new_data = {f"{item['warehouseName']}-{item['date']}": item for item in filtered}
-            new_items = [item for key, item in new_data.items() if key not in previous_data]
+            if coefficients:
+                filtered = filter_coefficients(coefficients, monitoring_interval, max_coefficient)
+                new_data = {f"{item['warehouseName']}-{item['date']}": item for item in filtered}
+                new_items = [item for key, item in new_data.items() if key not in previous_data]
 
-            if new_items:
-                logger.info(f"Обнаружено {len(new_items)} новых записей.")
-                await query.message.reply_text("\n".join(format_coefficients(new_items)))
-            previous_data = new_data
+                if new_items:
+                    logger.info(f"Обнаружено {len(new_items)} новых записей.")
+                    await update.callback_query.message.reply_text("\n".join(format_coefficients(new_items)))
 
-        # Логирование через заданный интервал
-        if (datetime.now() - last_log_time).seconds >= log_interval:
-            logger.info(f"Мониторинг активен. Проверено {len(coefficients)} записей.")
-            last_log_time = datetime.now()
+                previous_data = new_data
 
-        await asyncio.sleep(10)  # Период запроса к API
+            # Логирование через заданный интервал
+            if (datetime.now() - last_log_time).seconds >= log_interval:
+                logger.info(f"Мониторинг активен. Проверено {len(coefficients)} записей.")
+                last_log_time = datetime.now()
 
+            await asyncio.sleep(10)
+    except asyncio.CancelledError:
+        logger.info("Задача мониторинга была прервана.")
+    finally:
+        is_monitoring = False  # Сбрасываем флаг при завершении
 
 
 # Остановка мониторинга
 async def stop_monitoring(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    global is_monitoring
+    global is_monitoring, monitoring_task  # Указываем, что используется глобальная переменная
     query = update.callback_query
     await query.answer()
+
+    if not is_monitoring:
+        await query.edit_message_text("Мониторинг не был запущен.")
+        return
+
+    # Прерываем задачу мониторинга
     is_monitoring = False
+    if monitoring_task:
+        monitoring_task.cancel()
+        try:
+            await monitoring_task
+        except asyncio.CancelledError:
+            logger.info("Задача мониторинга успешно остановлена.")
+
     await query.edit_message_text("Мониторинг остановлен.")
+
+
+# Обработчик для кнопки "Меню"
+async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик кнопки 'Меню', вызывает настройки мониторинга."""
+    await handle_monitoring_settings(update, context)
+
+
+
 
 # Запуск приложения
 def main():
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("start", start))  # Команда /start
+    application.add_handler(MessageHandler(filters.TEXT & filters.Regex("^Меню$"), menu_handler))  # Кнопка "Меню"
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_coefficient_input))
-    application.add_handler(CallbackQueryHandler(monitoring_settings, pattern="^monitoring_settings$"))
+    application.add_handler(CallbackQueryHandler(handle_monitoring_settings, pattern="^handle_monitoring_settings$"))  # Inline-настройки
     application.add_handler(CallbackQueryHandler(set_interval, pattern="^set_interval$"))
     application.add_handler(CallbackQueryHandler(set_monitoring_interval, pattern="^interval_"))
     application.add_handler(CallbackQueryHandler(set_monitoring_coefficient, pattern="^set_coefficient$"))
     application.add_handler(CallbackQueryHandler(start_monitoring, pattern="^start_monitoring$"))
     application.add_handler(CallbackQueryHandler(stop_monitoring, pattern="^stop_monitoring$"))
-    application.add_handler(CallbackQueryHandler(monitoring_settings, pattern="^monitoring_settings$"))
     application.add_handler(CallbackQueryHandler(select_acceptance_types, pattern="^set_acceptance_types$"))
     application.add_handler(CallbackQueryHandler(toggle_acceptance_type, pattern="^toggle_type_"))
     application.add_handler(CallbackQueryHandler(finish_acceptance_types, pattern="^finish_acceptance_types$"))
