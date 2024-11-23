@@ -16,13 +16,17 @@ logger = logging.getLogger(__name__)
 
 # Ключи для API Wildberries и Telegram
 WB_API_KEY = "eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjQxMTE4djEiLCJ0eXAiOiJKV1QifQ.eyJlbnQiOjEsImV4cCI6MTc0NzczMTIwMywiaWQiOiIwMTkzNDEwZC0zMTlkLTdjNDctYWJjYS05MDQyMTlmMTdmZmEiLCJpaWQiOjU4NjU2MzkzLCJvaWQiOjQyNTU1NzcsInMiOjEwNzM3NDI4NDgsInNpZCI6IjFmNTRhOGY5LWRlNTEtNDg5ZC04MWZiLWZlOTAwNDlkZmRmMSIsInQiOmZhbHNlLCJ1aWQiOjU4NjU2MzkzfQ.wQqeHP6gHpJz1Ytj4mh-EV3V8dEqnPmH0XZNOlmtJsO4L0dGPfPOeLsqUTv5qcIpRaBIgOQIhWciyLwsTys2Ow"
-TELEGRAM_BOT_TOKEN = "8028999606:AAFYdlfmELLfQ388Y19ktkTrmUEfw-9XQAI"
+TELEGRAM_BOT_TOKEN = "8094967220:AAFTSfxcigVWIFDLYMbzTqmJEf3QAEzzFXY"
 
 # Глобальные переменные
 monitored_warehouses = set()
 selected_types = set()
 monitoring_interval = 7  # Интервал мониторинга по умолчанию (в днях)
 max_coefficient = 18  # Максимальный коэффициент по умолчанию
+# Пароль для авторизации
+AUTHORIZED_PASSWORD = "72354890"
+# Хранение авторизованных пользователей
+authorized_users = set()
 is_monitoring = False
 previous_data = {}  # Хранит предыдущие результаты мониторинга
 acceptance_type_emojis = {
@@ -50,25 +54,81 @@ def load_warehouses():
 
 all_warehouses = load_warehouses()
 
-# Функция для отображения стартового меню с кнопкой "Меню"
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Отображает клавиатуру с кнопкой 'Меню'."""
-    logger.info("Пользователь начал взаимодействие с ботом.")
-    
-    # Reply-клавиатура с кнопкой "Меню"
-    reply_keyboard = [["Меню"]]
-    reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
-    
-    await update.message.reply_text(
-        "Добро пожаловать! Нажмите 'Меню' для настройки мониторинга.",
-        reply_markup=reply_markup
-    )
+    """Обрабатывает команду /start и предлагает авторизацию."""
+    user_id = update.effective_user.id
 
-# Обработчик кнопки "Меню"
+    # Проверяем, авторизован ли пользователь
+    if user_id in authorized_users:
+        logger.info(f"Авторизованный пользователь {user_id} начал работу с ботом.")
+        reply_keyboard = [["Меню"]]
+        reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
+        await update.message.reply_text(
+            "Вы уже авторизованы! Нажмите 'Меню' для настройки мониторинга.",
+            reply_markup=reply_markup
+        )
+    else:
+        logger.info(f"Неавторизованный пользователь {user_id} начал работу с ботом.")
+        await update.message.reply_text(
+            "Добро пожаловать! Для продолжения введите пароль."
+        )
+
+async def handle_password_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Проверяет введённый пользователем пароль."""
+    user_id = update.effective_user.id
+    password = update.message.text.strip()
+
+    # Если пользователь уже авторизован
+    if user_id in authorized_users:
+        logger.info(f"Пользователь {user_id} уже авторизован.")
+        await update.message.reply_text("Вы уже авторизованы. Используйте кнопку 'Меню'.")
+        return
+
+    # Проверка пароля
+    if password == AUTHORIZED_PASSWORD:
+        authorized_users.add(user_id)
+        logger.info(f"Пользователь {user_id} успешно авторизован.")
+        reply_keyboard = [["Меню"]]
+        reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
+        await update.message.reply_text(
+            "Авторизация успешна! Нажмите 'Меню' для настройки мониторинга.",
+            reply_markup=reply_markup
+        )
+    else:
+        logger.warning(f"Пользователь {user_id} ввёл неверный пароль.")
+        await update.message.reply_text("Неверный пароль. Попробуйте ещё раз.")
+
+
+
+
+
+
+def is_user_authorized(update: Update) -> bool:
+    """Проверяет, авторизован ли пользователь."""
+    return update.effective_user.id in authorized_users
+
+
+
+
+
+
+
+
+
+
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обрабатывает нажатие кнопки 'Меню' и вызывает настройки мониторинга."""
-    logger.info("Нажата кнопка 'Меню'.")
+    """Обрабатывает нажатие кнопки 'Меню'."""
+    user_id = update.effective_user.id
+
+    if user_id not in authorized_users:
+        logger.warning(f"Пользователь {user_id} попытался получить доступ без авторизации.")
+        await update.message.reply_text("Вы не авторизованы. Введите пароль для доступа.")
+        return
+
+    # Показать настройки мониторинга
     await handle_monitoring_settings(update, context)
+
+
 
 
 # Получение данных из Wildberries
@@ -105,19 +165,26 @@ def is_similar(warehouse_api_name, warehouse_monitor_name, threshold=0.7):
 
 # Настройки мониторинга
 async def handle_monitoring_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+
+    if not is_user_authorized(update):
+        await update.message.reply_text("Вы не авторизованы. Введите пароль для доступа.")
+        return
+
     logger.info("Пользователь открыл настройки мониторинга.")
+      
     keyboard = [
-        [InlineKeyboardButton("Выбрать диапазон дат", callback_data="set_interval")],
-        [InlineKeyboardButton("Изменить коэффициент", callback_data="set_coefficient")],
-        [InlineKeyboardButton("Выбрать склады", callback_data="set_warehouses")],
-        [InlineKeyboardButton("Выбрать тип приемки", callback_data="set_acceptance_types")],
+        [InlineKeyboardButton("Дата", callback_data="set_date_settings")],
+        [InlineKeyboardButton("Коэффициент", callback_data="set_coefficient")],
+        [InlineKeyboardButton("Склады", callback_data="set_warehouses")],
+        [InlineKeyboardButton("Типы приемки", callback_data="set_acceptance_types")],
         [InlineKeyboardButton("Запустить мониторинг", callback_data="start_monitoring")],
         [InlineKeyboardButton("Остановить мониторинг", callback_data="stop_monitoring")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-
+    status = "Активен ✅" if is_monitoring else "Остановлен ❌"
     monitoring_message = (
         f"Текущие настройки:\n"
+        f"Статус мониторинга: {status}\n"  # Добавлен статус мониторинга
         f"Диапазон дат: {monitoring_interval} дней\n"
         f"Максимальный коэффициент: {max_coefficient}\n"
         f"Склады: {', '.join(monitored_warehouses) if monitored_warehouses else 'Все'}\n"
@@ -128,6 +195,48 @@ async def handle_monitoring_settings(update: Update, context: ContextTypes.DEFAU
         await update.callback_query.edit_message_text(monitoring_message, reply_markup=reply_markup)
     else:
         await update.message.reply_text(monitoring_message, reply_markup=reply_markup)
+
+
+async def set_date_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Позволяет выбрать способ задания даты мониторинга: диапазон или конкретная дата."""
+    query = update.callback_query
+    await query.answer()
+
+    keyboard = [
+        [InlineKeyboardButton("Диапазон дат", callback_data="set_interval")],
+        [InlineKeyboardButton("Конкретная дата (В разработке)", callback_data="set_specific_date")],
+        [InlineKeyboardButton("Назад", callback_data="handle_monitoring_settings")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text("Выберите способ задания даты мониторинга:", reply_markup=reply_markup)
+
+
+async def set_specific_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Запрашивает ввод конкретной даты от пользователя."""
+    query = update.callback_query
+    await query.answer()
+
+    # Установить флаг для ожидания ввода текста
+    context.user_data["awaiting_specific_date"] = True
+    await query.edit_message_text("Введите конкретную дату в формате DD-MM-YYYY:")
+    logger.info("Установлен флаг ожидания конкретной даты.")
+
+async def handle_specific_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if context.user_data.get("awaiting_specific_date"):
+        try:
+            specific_date = datetime.strptime(update.message.text, "%d-%m-%Y").date()
+            context.user_data["specific_date"] = specific_date
+            context.user_data["awaiting_specific_date"] = False
+
+            await update.message.reply_text(
+                f"Дата мониторинга установлена: {specific_date.strftime('%d-%m-%Y')}."
+            )
+            await handle_monitoring_settings(update, context)
+            logger.info(f"Получена дата от пользователя: {update.message.text}")
+
+        except ValueError:
+            await update.message.reply_text("Некорректный формат даты. Попробуйте ещё раз (например, 11-18-2024).")
+
 
 # Установка диапазона мониторинга
 async def set_interval(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -373,37 +482,41 @@ def format_coefficients(data):
 
 
 
-def filter_coefficients(data, interval, max_coeff):
+def filter_coefficients(data, interval, max_coeff, specific_date=None):
     """
     Фильтрует данные по складам, диапазону дат, коэффициентам и типу приемки.
     :param data: Данные, полученные из API.
     :param interval: Диапазон мониторинга (в днях).
     :param max_coeff: Максимальный допустимый коэффициент.
+    :param specific_date: Конкретная дата для мониторинга (если задана).
     :return: Список отфильтрованных записей.
     """
-    logger.info("Фильтрация данных по складам, диапазону дат, коэффициентам и типу приемки.")
-    logger.info(f"Активные склады для мониторинга: {monitored_warehouses}")
-
+    logger.info("Фильтрация данных по складам, датам, коэффициентам и типу приемки.")
     filtered = []
-    end_date = datetime.now() + timedelta(days=interval)
+
+    # Устанавливаем дату фильтрации
+    end_date = datetime.now().date() + timedelta(days=interval) if not specific_date else specific_date
 
     for item in data:
         warehouse = item.get("warehouseName", "Неизвестный склад")
-        date = datetime.fromisoformat(item["date"][:10])
+        date = datetime.fromisoformat(item["date"][:10]).date()
         coefficient = item.get("coefficient", None)
         box_type = item.get("boxTypeName", "")
 
-        # Исключаем некорректные коэффициенты
         if coefficient is None or coefficient < 0:
             continue
 
-        # Фильтрация по складам, типам приемки, диапазону дат и коэффициентам
-        if warehouse in monitored_warehouses and box_type in selected_types:
-            if date <= end_date and coefficient <= max_coeff:
+        # Фильтрация по параметрам
+        if specific_date:  # Если задана конкретная дата
+            if date == specific_date and warehouse in monitored_warehouses and box_type in selected_types:
+                filtered.append(item)
+        else:  # Если диапазон дат
+            if date <= end_date and warehouse in monitored_warehouses and box_type in selected_types:
                 filtered.append(item)
 
     logger.info(f"Отфильтровано {len(filtered)} записей из {len(data)}.")
     return filtered
+
 
 
 
@@ -415,16 +528,35 @@ async def start_monitoring(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     query = update.callback_query
     await query.answer()
 
-    # Проверяем, если мониторинг уже запущен
+ # Проверка статуса мониторинга
     if is_monitoring:
-        await query.edit_message_text("Мониторинг уже запущен.")
+        logger.info("Попытка запустить мониторинг, когда он уже активен.")
+        if update.callback_query:
+            await update.callback_query.answer()
+            await update.callback_query.edit_message_text(
+                "Мониторинг уже запущен.\n"
+                "Чтобы запустить мониторинг повторно, остановите текущий мониторинг.",
+            )
+        else:
+            await update.message.reply_text(
+                "Мониторинг уже запущен.\n"
+                "Чтобы запустить мониторинг повторно, остановите текущий мониторинг.",
+            )
         return
 
+    # Установка флага мониторинга
     is_monitoring = True
-    await query.edit_message_text("Мониторинг запущен!")
 
-    # Запускаем задачу мониторинга
-    monitoring_task = asyncio.create_task(monitoring_loop(update, context))
+    # Уведомление пользователя о запуске мониторинга
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text("Мониторинг запущен!")
+    else:
+        await update.message.reply_text("Мониторинг запущен!")
+
+    # Запуск процесса мониторинга
+    logger.info("Запуск процесса мониторинга.")
+    monitoring_task = asyncio.create_task(monitoring_loop())
 
 
 # Основной цикл мониторинга
@@ -484,21 +616,34 @@ async def stop_monitoring(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 # Обработчик для кнопки "Меню"
+
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обработчик кнопки 'Меню', вызывает настройки мониторинга."""
+    """Обрабатывает нажатие кнопки 'Меню'."""
+    user_id = update.effective_user.id
+
+    if user_id not in authorized_users:
+        logger.warning(f"Пользователь {user_id} попытался получить доступ без авторизации.")
+        await update.message.reply_text("Вы не авторизованы. Введите пароль для доступа.")
+        return
+
+    logger.info(f"Пользователь {user_id} вызвал меню.")
+    # Показываем настройки мониторинга
     await handle_monitoring_settings(update, context)
-
-
 
 
 # Запуск приложения
 def main():
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))  # Команда /start
-    application.add_handler(MessageHandler(filters.TEXT & filters.Regex("^Меню$"), menu_handler))  # Кнопка "Меню"
+    application.add_handler(MessageHandler(filters.TEXT & filters.Regex("^Меню$"), menu_handler))  # Обработчик кнопки "Меню"
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_password_input))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^Меню$"),handle_password_input))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_coefficient_input))
-    application.add_handler(CallbackQueryHandler(handle_monitoring_settings, pattern="^handle_monitoring_settings$"))  # Inline-настройки
+    application.add_handler(CallbackQueryHandler(handle_monitoring_settings, pattern="^handle_monitoring_settings$"))
     application.add_handler(CallbackQueryHandler(set_interval, pattern="^set_interval$"))
+    application.add_handler(CallbackQueryHandler(set_date_settings, pattern="^set_date_settings$"))
+    application.add_handler(CallbackQueryHandler(set_specific_date, pattern="^set_specific_date$"))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_specific_date_input))
     application.add_handler(CallbackQueryHandler(set_monitoring_interval, pattern="^interval_"))
     application.add_handler(CallbackQueryHandler(set_monitoring_coefficient, pattern="^set_coefficient$"))
     application.add_handler(CallbackQueryHandler(start_monitoring, pattern="^start_monitoring$"))
