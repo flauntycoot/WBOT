@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # Загрузка переменных окружения из файла .env
 load_dotenv()
 WB_API_KEY = "eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjQxMTE4djEiLCJ0eXAiOiJKV1QifQ.eyJlbnQiOjEsImV4cCI6MTc0OTQzNDI0NSwiaWQiOiIwMTkzYTY4Zi04YTNhLTc0NzQtODgzNy0xMThlNTEyNzI0ZjEiLCJpaWQiOjU4NjU2MzkzLCJvaWQiOjQyNTU1NzcsInMiOjEwNDAsInNpZCI6IjFmNTRhOGY5LWRlNTEtNDg5ZC04MWZiLWZlOTAwNDlkZmRmMSIsInQiOmZhbHNlLCJ1aWQiOjU4NjU2MzkzfQ.i-ii2dLXASqt68Q5nn8nKGmRccfB30pD3mn6fOfDvZMSpjqaTA6QBKYkk2M0KIjvD9RpmnZTsuIsrxpkKZwMpA"
-TELEGRAM_BOT_TOKEN = "8094967220:AAFTSfxcigVWIFDLYMbzTqmJEf3QAEzzFXY"
+TELEGRAM_BOT_TOKEN = "8028999606:AAFYdlfmELLfQ388Y19ktkTrmUEfw-9XQAI"
 
 # Глобальные переменные
 monitored_warehouses = set()
